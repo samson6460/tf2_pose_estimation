@@ -1,0 +1,7 @@
+tensorflow>=2.0.0
+numpy
+Pillow
+matplotlib
+pandas
+opencv-python
+imgaug==0.4.0
