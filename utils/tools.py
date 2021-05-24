@@ -1,7 +1,7 @@
 # Copyright 2020 Samson. All Rights Reserved.
 # =============================================================================
 
-"""Utilities and tools for Yolo.
+"""Utilities and tools for pose estimation.
 """
 import base64
 import json
@@ -19,27 +19,36 @@ from matplotlib.colors import to_rgb
 from matplotlib.patches import Circle
 from PIL import Image
 import cv2
+from imgaug.augmentables import Keypoint, KeypointsOnImage
+from tensorflow.keras.utils import Sequence
 
 
-def read_img(path, size=(512, 512), rescale=None):
-    """Read pictures as ndarray.
+def read_img(path, size=(512, 512), rescale=None, preprocessing=None):
+    """Read images as ndarray.
 
     Args:
-        size: A tuple of 2 integers(heights, widths).
+        path: A string, path of images.
+        size: A tuple of 2 integers,
+            (heights, widths).
         rescale: A float or None,
             specifying how the image value should be scaled.
             If None, no scaled.
+        preprocessing: A function of data preprocessing,
+            (e.g. noralization, shape manipulation, etc.)
     """
     img_list = [f for f in os.listdir(path) if not f.startswith(".")]
     data = np.empty((len(img_list), *size, 3))
 
-    for i, _path in enumerate(img_list):
+    for img_i, _path in enumerate(img_list):
         img = Image.open(path + os.sep + _path)
         img = _process_img(img, size)
-        data[i] = img
-    if rescale is not None:
-        data *=rescale
-     
+        data[img_i] = img
+
+    if rescale:
+        data = data*rescale
+    if preprocessing is not None:
+        data = preprocessing(data)
+        
     return data
 
 
@@ -50,142 +59,467 @@ def _process_img(img, size):
     img = np.array(img)
     return img
 
-
-def read_file(img_path=None,
-              label_path=None,
-              label_format="labelme",
-              img_size=(512, 512),
-              label_size="auto",
-              label_class=["Head", "Neck", "Hip",
-                "L_shoulder", "L_elbow", "L_wrist",
-                "R_shoulder", "R_elbow", "R_wrist",
-                "L_hip", "L_knee", "L_ankle",
-                "R_hip", "R_knee", "R_ankle"],
-              sigma=2,
-              augmenter=None,
-              aug_times=1,
-              shuffle=False,
-              seed=None,
-              thread_num=10):
-    """Read the images and annotations created by labelimg or labelme.
+class Keypoint_reader(object):
+    """Read the images and keypoint annotations.
 
     Args:
-        img_path: A string, 
-            file path of images.
-        label_path: A string,
-            file path of annotations.
-        label_format: A string,
-            one of "labelme" and "labelimg(not yet supported)" .
-        img_size: A tuple of 2 integer,
-            shape of output image(heights, widths).
-        label_size: A tuple of 2 integers or a string,
-            "auto" means to set size as img_size divided by 4.
-            "same" means to set size as img_size.
-        label_class: A list of string,
-            containing all label names.
-        sigma: A integer,
-            standard deviation of 2D gaussian distribution.
+        rescale: A float or None,
+            specifying how the image value should be scaled.
+            If None, no scaled.
+        preprocessing: A function of data preprocessing,
+            (e.g. noralization, shape manipulation, etc.)
         augmenter: A `imgaug.augmenters.meta.Sequential` instance.
         aug_times: An integer,
-            the default is 1, which means no augmentation.
-        shuffle: Boolean, default: True.
-        seed: An integer, random seed, default: None.
-        thread_num: An integer,
-            specifying the number of threads to read files.
+            The default is 1, which means no augmentation.
 
-    Returns:
-        A tuple of 2 ndarrays, (data, label),
-        shape of data: (sample_num, img_height, img_width, channel)
-        shape of label: (sample_num, label_height, label_width, class_num)
+    Attributes:
+        rescale
+        preprocessing
+        augmenter
+        aug_times
+        file_names: A list of string
+            with all file names that have been read.
+
+    Return:
+        A reader instance for images and annotations.
+
     """
-    def _read_labelimg(_path_list, _pos):
-        pass
+    def __init__(self, rescale=None,
+                 preprocessing=None,
+                 augmenter=None, aug_times=1):
+        self.rescale = rescale
+        self.preprocessing = preprocessing
+        self.augmenter = augmenter
+        self.aug_times = aug_times
+        self.file_names = None
 
-    def _read_labelme(_path_list, _pos):
-        for _path_list_i, name in enumerate(_path_list):
-            pos = (_pos + _path_list_i)*aug_times
+        if augmenter is None:
+            self.aug_times = 1
 
-            with open(os.path.join(
-                      label_path,
-                      name[:name.rfind(".")] + ".json"),
-                      encoding="big5") as f:
-                jdata = f.read()
-                data = json.loads(jdata)
+    def labelme_json_to_dataset(
+        self, img_path=None, label_path=None,
+        class_names=["Head", "Neck", "Hip",
+                     "L_shoulder", "L_elbow", "L_wrist",
+                     "R_shoulder", "R_elbow", "R_wrist",
+                     "L_hip", "L_knee", "L_ankle",
+                     "R_hip", "R_knee", "R_ankle"],
+        img_size=(512, 512),
+        label_size="auto",
+        heatmap_type="gs",
+        sigma=2,
+        shuffle=False,
+        seed=None,
+        encoding="big5",
+        thread_num=10):
+        """Read the images and annotations created by labelimg or labelme.
 
-            if img_path is None:
-                img64 = data['imageData']
-                img = Image.open(BytesIO(base64.b64decode(img64)))
+        Args:
+            img_path: A string, 
+                file path of images.
+            label_path: A string,
+                file path of annotations.
+            class_names: A list of string,
+                containing all label names.
+            img_size: A tuple of 2 integer,
+                shape of output image(heights, widths).
+            label_size: A tuple of 2 integers or a string,
+                "auto" means to set size as img_size divided by 4.
+                "same" means to set size as img_size.
+            heatmap_type: A string, one of "gs" or "exp".
+                "gs": Gaussian heatmap.
+                "exp": Exponential heatmap(proposed by 
+                https://pubmed.ncbi.nlm.nih.gov/31683913/).
+            sigma: A integer,
+                standard deviation of 2D gaussian distribution.
+            shuffle: Boolean, default: True.
+            seed: An integer, random seed, default: None.
+            thread_num: An integer,
+                specifying the number of threads to read files.
+
+        Returns:
+            A tuple of 2 ndarrays, (img data, label data),
+            img data: 
+                shape (sample_num, img_height, img_width, channel)
+            label data:
+                shape (sample_num, label_height, label_width, class_num)
+        """
+        return self._file_to_array(
+            img_path=img_path, label_path=label_path,
+            class_names=class_names,
+            img_size=img_size, label_size=label_size,
+            heatmap_type=heatmap_type, sigma=sigma,
+            shuffle=shuffle, seed=seed,
+            encoding=encoding,
+            thread_num=thread_num, format="labelme")
+
+    def _process_paths(self, path_list):
+        path_list = np.array(path_list)
+        U_num = path_list.dtype.itemsize//4 + 5
+        dtype = "<U" + str(U_num)
+        filepaths = np.empty((len(path_list),
+                             self.aug_times),
+                             dtype = dtype)
+        filepaths[:, 0] = path_list
+        filepaths[:, 1:] = np.char.add(filepaths[:, 0:1], "(aug)")
+        path_list = filepaths.flatten()
+        return path_list
+    
+    def _file_to_array(self, img_path, label_path,
+                       class_names,
+                       img_size, label_size,
+                       heatmap_type, sigma,
+                       shuffle, seed,
+                       encoding,
+                       thread_num, format):
+        def _encode_to_array(img, kps, pos, indexes):
+            for index, keypoint in zip(indexes, kps.keypoints):
+                img_data[pos] = img
+
+                point = keypoint.x, keypoint.y
+                label_im = draw_heatmap(
+                    *label_size, point,
+                    sigma, heatmap_type)
+                label_data[pos][..., index] = label_im
+        def _imgaug_to_array(img, kps, pos, indexes):
+            _encode_to_array(img, kps, pos, indexes)
+            if self.augmenter is not None:
+                for aug_i in range(1, self.aug_times):
+                    img_aug, kps_aug = self.augmenter(
+                        image=img, keypoints=kps)
+                    _encode_to_array(img_aug, kps_aug,
+                        pos + aug_i, indexes)
+        def _read_labelimg(_path_list, _pos):
+            pass
+
+        def _read_labelme(_path_list, _pos):
+            for _path_list_i, name in enumerate(_path_list):
+                pos = (_pos + _path_list_i)*self.aug_times
+
+                with open(os.path.join(
+                        label_path,
+                        name[:name.rfind(".")] + ".json"),
+                        encoding=encoding) as f:
+                    jdata = f.read()
+                    data = json.loads(jdata)
+
+                if img_path is None:
+                    img64 = data['imageData']
+                    img = Image.open(BytesIO(base64.b64decode(img64)))
+                else:
+                    img = Image.open(os.path.join(img_path, name))
+
+                zoom_r = (np.array(img.size)
+                          /np.array((label_size[1], label_size[0])))
+                img = _process_img(img, img_size)
+
+                kps = []
+                indexes = []
+                for data_i in range(len(data['shapes'])):
+                    label = data["shapes"][data_i]["label"]
+                    if label in class_names:
+                        index = class_names.index(label)
+                        indexes.append(index)
+
+                        point = np.array(data['shapes'][data_i]['points'])
+                        point = point.squeeze()/zoom_r
+                        kps.append(Keypoint(x=point[0],
+                                            y=point[1]))
+                kps = KeypointsOnImage(kps, shape=label_size)
+                _imgaug_to_array(img, kps, pos, indexes)
+        if label_size == "auto":
+            label_size = img_size[0]//4, img_size[1]//4
+        elif label_size == "same":
+            label_size = img_size
+        
+        if (format == "labelme" 
+            and (img_path is None or label_path is None)):
+            if label_path is None:
+                label_path = img_path
+                img_path = None
+            path_list = os.listdir(label_path)
+            path_list = [f for f in path_list if f.endswith(".json")]
+        else:
+            path_list = os.listdir(img_path)
+            path_list = [f for f in path_list if not f.startswith(".")]
+        path_list_len = len(path_list)
+        
+        class_num = len(class_names)
+
+        img_data = np.empty((path_list_len*self.aug_times,
+                            *img_size, 3))
+        label_data = np.zeros((path_list_len*self.aug_times,
+                            *label_size, class_num))
+
+        threads = []
+        workers_num = ceil(path_list_len/thread_num)
+        if format == "labelimg":
+            thread_func = _read_labelimg
+        elif format == "labelme":
+            thread_func = _read_labelme
+        else:
+            raise ValueError("Invalid format:", format)  
+
+        for path_list_i in range(0, path_list_len, workers_num):
+            threads.append(
+                threading.Thread(target = thread_func,
+                args = (
+                    path_list[path_list_i:path_list_i + workers_num],
+                    path_list_i))
+            )
+        for thread in threads:
+            thread.start()                
+        for thread in threads:
+            thread.join()
+
+        if self.rescale is not None:
+            img_data = img_data*self.rescale
+        if self.preprocessing is not None:
+            img_data = self.preprocessing(img_data)
+
+        path_list = self._process_paths(path_list)
+
+        if shuffle:
+            if seed is not None:
+                np.random.seed(seed)
+            shuffle_index = np.arange(len(img_data))
+            np.random.shuffle(shuffle_index)
+            img_data = img_data[shuffle_index]
+            label_data = label_data[shuffle_index]
+            path_list = path_list[shuffle_index]
+
+        path_list = path_list.tolist()
+        self.file_names = path_list
+
+        return img_data, label_data
+    
+    def labelme_json_to_sequence(
+        self, img_path=None, label_path=None,
+        batch_size=20,
+        class_names=["Head", "Neck", "Hip",
+                     "L_shoulder", "L_elbow", "L_wrist",
+                     "R_shoulder", "R_elbow", "R_wrist",
+                     "L_hip", "L_knee", "L_ankle",
+                     "R_hip", "R_knee", "R_ankle"],
+        img_size=(512, 512), label_size="auto",
+        heatmap_type="gs", sigma=2,
+        shuffle=False, seed=None,
+        encoding="big5", thread_num=1):
+        """Convert the JSON file generated by `labelme` into a Sequence.
+
+        Args:
+            img_path: A string, 
+                file path of images.
+            label_path: A string,
+                file path of annotations.
+            batch_size:  An integer,
+                size of the batches of data (default: 20).
+            class_names: A list of string,
+                containing all label names.
+            img_size: A tuple of 2 integer,
+                shape of output image(heights, widths).
+            label_size: A tuple of 2 integers or a string,
+                "auto" means to set size as img_size divided by 4.
+                "same" means to set size as img_size.
+            heatmap_type: A string, one of "gs" or "exp".
+                "gs": Gaussian heatmap.
+                "exp": Exponential heatmap(proposed by 
+                https://pubmed.ncbi.nlm.nih.gov/31683913/).
+            sigma: A integer,
+                standard deviation of 2D gaussian distribution.
+            shuffle: Boolean, default: True.
+            seed: An integer, random seed, default: None.
+            encoding: A string,
+                encoding format of file, default: "big5".
+            thread_num: An integer,
+                specifying the number of threads to read files.
+
+        Returns:
+            A tf.Sequence.
+                Sequence[i]: (img data, label data)
+            img data: 
+                shape (batches, img_height, img_width, channel)
+            label data:
+                shape (batches, label_height, label_width, class_num)
+        """
+        seq = KeypointSequence(
+            img_path=img_path, label_path=label_path,
+            batch_size=batch_size, class_names=class_names,
+            img_size=img_size, label_size=label_size,
+            heatmap_type=heatmap_type, sigma=sigma,
+            label_format="labelme",
+            rescale=self.rescale,
+            preprocessing=self.preprocessing,
+            augmenter=self.augmenter,
+            shuffle=shuffle, seed=seed,
+            encoding=encoding, thread_num=thread_num)
+        self.file_names = seq.path_list
+
+        return seq
+
+
+class KeypointSequence(Sequence):
+
+    def __init__(self, img_path=None,
+                 label_path=None,
+                 batch_size=20,
+                 class_names=["Head", "Neck", "Hip",
+                              "L_shoulder", "L_elbow", "L_wrist",
+                              "R_shoulder", "R_elbow", "R_wrist",
+                              "L_hip", "L_knee", "L_ankle",
+                              "R_hip", "R_knee", "R_ankle"],
+                 img_size=(512, 512),
+                 label_size="auto",
+                 heatmap_type="gs",
+                 sigma=2,
+                 label_format="labelme",
+                 rescale=1/255,
+                 preprocessing=None,
+                 augmenter=None,
+                 shuffle=False,
+                 seed=None,
+                 encoding="big5",
+                 thread_num=1):
+        self.img_path = img_path
+        self.label_path = label_path
+        self.batch_size = batch_size
+        self.class_names = class_names
+        self.class_num = len(class_names)
+        self.img_size = img_size
+        self.heatmap_type = heatmap_type
+        self.sigma = sigma     
+        self.label_format = label_format
+        self.rescale = rescale
+        self.preprocessing = preprocessing
+        self.augmenter = augmenter
+        self.shuffle = shuffle
+        self.seed = seed
+        self.encoding = encoding
+        self.thread_num = thread_num
+
+        if label_size == "auto":
+            self.label_size = img_size[0]//4, img_size[1]//4
+        elif label_size == "same":
+            self.label_size = img_size
+        
+        if (label_format == "labelme" 
+            and (img_path is None or label_path is None)):
+            if label_path is None:
+                self.label_path = img_path
+                self.img_path = None
+            path_list = os.listdir(self.label_path)
+            self.path_list = [f for f in path_list if f.endswith(".json")]
+        else:
+            path_list = os.listdir(img_path)
+            self.path_list = [f for f in path_list if not f.startswith(".")]
+
+        if shuffle:
+            if seed is not None:
+                np.random.seed(seed)
+            self.path_list = np.array(self.path_list)
+            np.random.shuffle(self.path_list)
+            self.path_list = self.path_list.tolist()
+
+    def __len__(self):
+        return ceil(len(self.path_list)/self.batch_size)
+
+    def __getitem__(self, idx):
+        if idx >= self.__len__():
+            raise IndexError("Sequence index out of range")
+        def _encode_to_array(img, kps, pos, indexes):
+            for index, keypoint in zip(indexes, kps.keypoints):
+                img_data[pos] = img
+
+                point = keypoint.x, keypoint.y
+                label_im = draw_heatmap(
+                    *self.label_size, point,
+                    self.sigma, self.heatmap_type)
+                label_data[pos][..., index] = label_im
+        
+        def _imgaug_to_array(img, kps, pos, indexes):
+            if self.augmenter is None:
+                _encode_to_array(img, kps, pos, indexes)
             else:
-                img = Image.open(os.path.join(img_path, name))
+                img_aug, kps_aug = self.augmenter(
+                    image=img, keypoints=kps)
+                _encode_to_array(img_aug, kps_aug,
+                    pos, indexes)
 
-            zoom_r = np.array(img.size)/np.array(label_size)
-            img = _process_img(img, img_size)
-            train_data[pos] = img/255.
+        def _read_labelimg(_path_list, _pos):
+            pass
 
-            for data_i in range(len(data['shapes'])):
-                label = data["shapes"][data_i]["label"]
-                if label in label_class:
-                    index = label_class.index(label)
-                    point = np.array(data['shapes'][data_i]['points'])
-                    point = point/zoom_r
-                    label_im = draw_heatmap(*label_size, point, sigma)
-                    label_data[pos][..., index] = label_im
-    if label_size == "auto":
-        label_size = img_size[0]//4, img_size[1]//4
-    elif label_size == "same":
-        label_size = img_size
-    
-    if (label_format == "labelme" 
-        and (img_path is None or label_path is None)):
-        if label_path is None:
-            label_path = img_path
-            img_path = None
-        path_list = os.listdir(label_path)
-        path_list = [f for f in path_list if f.endswith(".json")]
-    else:
-        path_list = os.listdir(img_path)
-        path_list = [f for f in path_list if not f.startswith(".")]
-    path_list_len = len(path_list)
-    
-    class_num = len(label_class)
-    if augmenter is None:
-        aug_times = 1
+        def _read_labelme(_path_list, _pos):
+            for _path_list_i, name in enumerate(_path_list):
+                pos = (_pos + _path_list_i)
 
-    train_data = np.empty((path_list_len*aug_times,
-                           *img_size, 3))
-    label_data = np.zeros((path_list_len*aug_times,
-                           *label_size, class_num))
+                with open(os.path.join(
+                        self.label_path,
+                        name[:name.rfind(".")] + ".json"),
+                        encoding=self.encoding) as f:
+                    jdata = f.read()
+                    data = json.loads(jdata)
 
-    threads = []
-    workers_num = ceil(path_list_len/thread_num)
-    if label_format == "labelimg":
-        thread_func = _read_labelimg
-    elif label_format == "labelme":
-        thread_func = _read_labelme
-    else:
-        raise ValueError("Invalid format:", label_format)  
+                if self.img_path is None:
+                    img64 = data['imageData']
+                    img = Image.open(BytesIO(base64.b64decode(img64)))
+                else:
+                    img = Image.open(os.path.join(self.img_path, name))
 
-    for path_list_i in range(0, path_list_len, workers_num):
-        threads.append(
-            threading.Thread(target = thread_func,
-            args = (
-                path_list[path_list_i:path_list_i + workers_num],
-                path_list_i))
-        )
-    for thread in threads:
-        thread.start()                
-    for thread in threads:
-        thread.join()
+                zoom_r = (np.array(img.size)
+                          /np.array((self.label_size[1], self.label_size[0])))
+                img = _process_img(img, self.img_size)
 
-    if shuffle:
-        if seed is not None:
-            np.random.seed(seed)
-        shuffle_index = np.arange(len(train_data))
-        np.random.shuffle(shuffle_index)
-        train_data = train_data[shuffle_index]
-        label_data = label_data[shuffle_index]
+                kps = []
+                indexes = []
+                for data_i in range(len(data['shapes'])):
+                    label = data["shapes"][data_i]["label"]
+                    if label in self.class_names:
+                        index = self.class_names.index(label)
+                        indexes.append(index)
 
-    return train_data, label_data
+                        point = np.array(data['shapes'][data_i]['points'])
+                        point = point.squeeze()/zoom_r
+                        kps.append(Keypoint(x=point[0],
+                                            y=point[1]))
+                kps = KeypointsOnImage(kps, shape=self.label_size)
+                _imgaug_to_array(img, kps, pos, indexes)
+
+        total_len = len(self.path_list)
+        if (idx + 1)*self.batch_size > total_len:
+            batch_size = total_len % self.batch_size
+        else:
+            batch_size = self.batch_size
+        img_data = np.empty((batch_size, *self.img_size, 3))
+        label_data = np.zeros((batch_size, *self.label_size,
+                               self.class_num))
+        start_idx = idx*self.batch_size
+        end_idx = (idx + 1)*self.batch_size
+        path_list = self.path_list[start_idx:end_idx]
+        if self.label_format == "labelimg":
+            thread_func = _read_labelimg
+        elif self.label_format == "labelme":
+            thread_func = _read_labelme
+        else:
+            raise ValueError("Invalid format: %s" % self.label_format)
+
+        threads = []
+        workers = ceil(len(path_list)/self.thread_num)
+
+        for worker_i in range(0, len(path_list), workers):
+            threads.append(
+                threading.Thread(target=thread_func,
+                args=(path_list[worker_i : worker_i+workers],
+                      worker_i)))
+        for thread in threads:
+            thread.start()                
+        for thread in threads:
+            thread.join()
+
+        if self.rescale is not None:
+            img_data = img_data*self.rescale
+        if self.preprocessing is not None:
+            img_data = self.preprocessing(img_data)
+      
+        return img_data, label_data
 
 
 def decode(label, zoom_r):
@@ -198,13 +532,13 @@ def decode(label, zoom_r):
 
 def vis_img_ann(img, label,
                 color=['r', 'lime', 'b', 'c', 'm', 'y',
-                    'pink', 'w', 'brown', 'g', 'teal',
-                    'navy', 'violet', 'linen', 'gold'],
+                       'pink', 'w', 'brown', 'g', 'teal',
+                       'navy', 'violet', 'linen', 'gold'],
                 connections = [[0, 1, 2],
-                            [1, 3, 4, 5],
-                            [1, 6, 7, 8],
-                            [2, 9, 10, 11],
-                            [2, 12, 13, 14]],
+                               [1, 3, 4, 5],
+                               [1, 6, 7, 8],
+                               [2, 9, 10, 11],
+                               [2, 12, 13, 14]],
                 figsize=None,
                 dpi=None,
                 axis="off",
@@ -407,6 +741,32 @@ def draw_heatmap(height, width,
         x = abs(x - point[0])
         y = abs(y - point[1])
         xx, yy = np.meshgrid(x, y)
+        exp_value = - alpha*(xx + yy)
+    heatmap = np.exp(exp_value)
+    return heatmap
+
+
+def draw_heatmap3D(size, point, sigma, mode="gs"):
+    batches = point.shape[0]
+    class_num = point.shape[-1]
+    x = np.arange(size[1], dtype=np.float)
+    y = np.arange(size[0], dtype=np.float)
+    xx = np.zeros((batches, *size, class_num))
+    xx = xx + x.reshape((1, 1, size[1], 1))
+    yy = np.zeros((batches, *size, class_num))
+    yy = yy + y.reshape((1, size[0], 1, 1))
+    if mode == "gs":
+        xx = (xx - point[..., 0].reshape(
+            batches, 1, 1, class_num))**2
+        yy = (yy - point[..., 1].reshape(
+            batches, 1, 1, class_num))**2
+        exp_value = - (xx + yy)/(2*sigma**2)
+    elif mode == "exp":
+        alpha = (log(2)/2)**0.5/sigma
+        xx = abs(xx - point[..., 0].reshape(
+            batches, 1, 1, class_num))
+        yy = abs(yy - point[..., 1].reshape(
+            batches, 1, 1, class_num))
         exp_value = - alpha*(xx + yy)
     heatmap = np.exp(exp_value)
     return heatmap

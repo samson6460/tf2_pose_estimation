@@ -5,7 +5,7 @@
 """
 
 from .tools import read_img
-from .tools import read_file
+from .tools import Keypoint_reader
 from .tools import vis_img_ann
 from .tools import draw_img_ann
 from .tools import get_class_weight
