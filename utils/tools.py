@@ -128,6 +128,9 @@ class Keypoint_reader(object):
                 https://pubmed.ncbi.nlm.nih.gov/31683913/).
             sigma: An integer or list of integers.
                 standard deviation of 2D gaussian distribution.
+            normalize: A boolean,
+                whether to normalize each channel in heatmaps
+                so that sum would be 1.
             num_stacks: An integer,
                 number of stacks of hourglass network.
             shuffle: Boolean, default: True.
@@ -356,6 +359,9 @@ class Keypoint_reader(object):
                 https://pubmed.ncbi.nlm.nih.gov/31683913/).
             sigma: An integer or list of integers.
                 standard deviation of 2D gaussian distribution.
+            normalize: A boolean,
+                whether to normalize each channel in heatmaps
+                so that sum would be 1.
             num_stacks: An integer,
                 number of stacks of hourglass network.
             shuffle: Boolean, default: True.

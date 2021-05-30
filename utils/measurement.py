@@ -40,10 +40,6 @@ def get_score_table(ground_truth, prediction,
         norm_index: A 2D array like.
         index: An integer,
             Calculate OKS of a single index.
-        use_std: A boolean,
-            whether to use standard deviation to control fall off.
-            If the batch size of ground_truth is 1,
-            this argument will be forced to False.
 
     Return:
         A pandas.Dataframe.
@@ -114,5 +110,3 @@ def get_score_table(ground_truth, prediction,
     score_table.index = [OKS_name, "recall"]
 
     return score_table
-    # %%
-# %%
