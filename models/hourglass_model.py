@@ -5,6 +5,9 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Conv2D, Add, ZeroPadding2D, UpSampling2D, Concatenate, MaxPooling2D, LeakyReLU
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.layers import Input
+from tensorflow.keras.layers import Activation
+
+from .custom_layers import Softmax
 
 
 def compose(*funcs):
@@ -38,15 +41,15 @@ def resblock_module(x, num_filters):
     return x
 
 
-def hourglass_module(input_tensor, num_classes):
-    num_classes -= 1
+def hourglass_module(input_tensor, stage):
+    stage -= 1
     skip = resblock_module(input_tensor, 256)
     x = MaxPooling2D(pool_size=(2,2), strides=(2,2))(input_tensor)
     x = resblock_module(x, 256)
-    if num_classes == 0:
+    if stage == 0:
         x = resblock_module(x, 256)
     else:
-        x = hourglass_module(x, num_classes)
+        x = hourglass_module(x, stage)
     x = resblock_module(x, 256)
     x = UpSampling2D(2)(x)
     x = Add()([skip, x])
@@ -66,12 +69,17 @@ def front_module(input_tensor, num_filters=256):
     return x
 
 def stack_module(input_tensor, num_points,
-                 num_filters=256, num_classes=4, is_head=False):
-    x = hourglass_module(input_tensor, num_classes)
+                 num_filters=256, stage=4,
+                 activation="sigmoid", is_head=False):
+    x = hourglass_module(input_tensor, stage)
     x = resblock_module(x, num_filters)
     x = Conv2D_BN_Leaky(num_filters, (1, 1))(x)
-    outputs = Conv2D(num_points, (1, 1), activation="sigmoid")(x)
-
+    outputs = Conv2D(num_points, (1, 1))(x)
+    if activation=="sigmoid":
+        outputs = Activation("sigmoid")(outputs)
+    elif activation=="softmax":
+        outputs = Softmax(axis=(1, 2))(outputs)
+    
     if is_head:
         return outputs
     else:
@@ -84,20 +92,25 @@ def stack_module(input_tensor, num_points,
 def stack_hourglass_net(
     input_shape=(512, 512, 3),
     num_stacks=8, num_points=15,
-    num_filters=256, num_classes=4,
+    num_filters=256, stage=4,
+    activation="sigmoid",
     pretrained_weights=None):
     """Create stacked hourglass network architecture.
 
     Args:
         input_shape: A tuple of 3 integers,
             shape of input image.
-        num_stacks: A integer.
-        num_points: A integer,
-            number of key points.
-        num_filters: A integer,
+        num_stacks: An integer,
+            number of stacks of hourglass network.
+        num_points: An integer,
+            number of keypoints.
+        num_filters: An integer,
             number of convolution filters.
-        num_classes: A integer,
-            number of hourglass module classes.
+        stage: An integer,
+            stage of each hourglass module.
+        activation: A string or None,
+            activation to add to the top of the network.
+            One of "sigmoid"、"softmax"(per channel) or None.
         pretrained_weights: A string, 
             file path of pretrained model.
     
@@ -113,14 +126,17 @@ def stack_hourglass_net(
         outputs, x = stack_module(
             x, num_points,
             num_filters=num_filters,
-            num_classes=num_classes)
+            stage=stage,
+            activation=activation)
         x = Add()([skip, x])
         output_list.append(outputs)
 
     outputs = stack_module(
         x, num_points,
         num_filters=num_filters,
-        num_classes=num_classes, is_head=True)
+        stage=stage,
+        activation=activation,
+        is_head=True)
     output_list.append(outputs)
 
     model = Model(inputs, output_list)

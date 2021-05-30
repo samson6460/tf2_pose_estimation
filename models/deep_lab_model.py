@@ -36,14 +36,12 @@ from tensorflow.keras.layers import Conv2D
 from tensorflow.keras.layers import DepthwiseConv2D
 from tensorflow.keras.layers import ZeroPadding2D
 from tensorflow.keras.layers import GlobalAveragePooling2D
+from tensorflow.keras.layers import Activation
 from tensorflow.keras.utils import get_source_inputs
 from tensorflow.keras.utils import get_file
 from tensorflow.keras.applications.imagenet_utils import preprocess_input
-import warnings
 
-warnings.filterwarnings(
-    "once",
-    category=PendingDeprecationWarning)
+from .custom_layers import Softmax
 
 
 WEIGHTS_PATH_X = ("https://github.com/bonlime/keras-deeplab-v3-plus"
@@ -256,7 +254,7 @@ def _inverted_res_block(inputs, expansion,
 def deeplabv3(pretrained_weights='pascal_voc',
               input_tensor=None,
               input_shape=(512, 512, 3),
-              categorical_num=4,
+              num_points=15,
               backbone='xception',
               OS=16, alpha=1.,
               activation="softmax"):
@@ -276,8 +274,8 @@ def deeplabv3(pretrained_weights='pascal_voc',
         input_shape: shape of input image. format HxWxC
             PASCAL VOC model was trained on (512, 512, 3) images.
             None is allowed as shape/width.
-        categorical_num: An integer,
-            number of categories without background.
+        num_points: An integer,
+            number of keypoints.
         backbone: backbone to use. one of {'xception','mobilenetv2'}
         OS: determines input_shape/feature_extractor_output ratio.
             One of {8,16}.
@@ -293,8 +291,9 @@ def deeplabv3(pretrained_weights='pascal_voc',
                     are used at each layer.
             Used only for mobilenetv2 backbone.
             Pretrained is only available for alpha=1.
-        activation: optional activation to add to the top of the network.
-            One of 'softmax', 'sigmoid' or None.
+        activation: A string or None,
+            activation to add to the top of the network.
+            One of "sigmoid"、"softmax"(per channel) or None.
 
     Returns:
         A tf.keras model instance.
@@ -514,13 +513,13 @@ def deeplabv3(pretrained_weights='pascal_voc',
                        depth_activation=True, epsilon=1e-5)
 
     # you can use it with arbitary number of classes
-    if ((pretrained_weights == 'pascal_voc' and categorical_num == 20)
-        or (pretrained_weights == 'cityscapes' and categorical_num == 18)):
+    if ((pretrained_weights == 'pascal_voc' and num_points == 20)
+        or (pretrained_weights == 'cityscapes' and num_points == 18)):
         last_layer_name = 'logits_semantic'
     else:
         last_layer_name = 'custom_logits_semantic'
 
-    x = Conv2D(categorical_num + 1, (1, 1), padding='same',
+    x = Conv2D(num_points, (1, 1), padding='same',
                name=last_layer_name)(x)
     size_before3 = tf.keras.backend.int_shape(img_input)
     x = Lambda(lambda xx: tf.compat.v1.image.resize(
@@ -535,8 +534,10 @@ def deeplabv3(pretrained_weights='pascal_voc',
     else:
         inputs = img_input
 
-    if activation in {'softmax', 'sigmoid'}:
-        x = tf.keras.layers.Activation(activation)(x)
+    if activation=="sigmoid":
+        x = Activation("sigmoid")(x)
+    elif activation=="softmax":
+        x = Softmax(axis=(1, 2))(x)
 
     model = Model(inputs, x, name='deeplabv3plus')
 

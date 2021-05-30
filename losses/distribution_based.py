@@ -27,3 +27,10 @@ def balanced_binary_crossentropy(class_weight=1, binary_weight=1):
             *tf.math.log(1 - y_pred))*class_weight, axis=-1)
         return bce
     return _balanced_binary_crossentropy
+
+
+def channeled_categorical_crossentropy(y_true, y_pred):
+    y_pred = tf.clip_by_value(y_pred, epsilon, 1 - epsilon)
+    ce = -tf.reduce_sum(
+        y_true*tf.math.log(y_pred), axis=(1, 2))
+    return ce

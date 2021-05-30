@@ -8,19 +8,19 @@ import json
 import os
 import threading
 from io import BytesIO
-from math import ceil, log
+from math import ceil, log, pi
 
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-from bs4 import BeautifulSoup
 from matplotlib.colors import to_rgb
 from matplotlib.patches import Circle
 from PIL import Image
 import cv2
 from imgaug.augmentables import Keypoint, KeypointsOnImage
 from tensorflow.keras.utils import Sequence
+from tensorflow.python.keras.layers import normalization
+from tensorflow.python.ops.nn_impl import normalize
 
 
 def read_img(path, size=(512, 512), rescale=None, preprocessing=None):
@@ -58,6 +58,7 @@ def _process_img(img, size):
     img = img.convert("RGB")
     img = np.array(img)
     return img
+
 
 class Keypoint_reader(object):
     """Read the images and keypoint annotations.
@@ -103,14 +104,10 @@ class Keypoint_reader(object):
                      "R_shoulder", "R_elbow", "R_wrist",
                      "L_hip", "L_knee", "L_ankle",
                      "R_hip", "R_knee", "R_ankle"],
-        img_size=(512, 512),
-        label_size="auto",
-        heatmap_type="gs",
-        sigma=2,
-        shuffle=False,
-        seed=None,
-        encoding="big5",
-        thread_num=10):
+        img_size=(512, 512), label_size="auto",
+        heatmap_type="gs", sigma=3.14, normalize=False,
+        num_stacks=1, shuffle=False, seed=None,
+        encoding="big5", thread_num=10):
         """Read the images and annotations created by labelimg or labelme.
 
         Args:
@@ -129,8 +126,10 @@ class Keypoint_reader(object):
                 "gs": Gaussian heatmap.
                 "exp": Exponential heatmap(proposed by 
                 https://pubmed.ncbi.nlm.nih.gov/31683913/).
-            sigma: A integer,
+            sigma: An integer or list of integers.
                 standard deviation of 2D gaussian distribution.
+            num_stacks: An integer,
+                number of stacks of hourglass network.
             shuffle: Boolean, default: True.
             seed: An integer, random seed, default: None.
             thread_num: An integer,
@@ -138,19 +137,44 @@ class Keypoint_reader(object):
 
         Returns:
             A tuple of 2 ndarrays, (img data, label data),
+            a list of tuples like above if num_stacks > 1.
             img data: 
                 shape (sample_num, img_height, img_width, channel)
             label data:
                 shape (sample_num, label_height, label_width, class_num)
         """
-        return self._file_to_array(
+        if hasattr(sigma, '__getitem__'):
+            first_sigma = sigma[0]
+        else:
+            first_sigma = sigma
+        img_data, label_data = self._file_to_array(
             img_path=img_path, label_path=label_path,
             class_names=class_names,
             img_size=img_size, label_size=label_size,
-            heatmap_type=heatmap_type, sigma=sigma,
-            shuffle=shuffle, seed=seed,
+            heatmap_type=heatmap_type, sigma=first_sigma,
+            normalize=normalize, shuffle=shuffle, seed=seed,
             encoding=encoding,
             thread_num=thread_num, format="labelme")
+
+        if num_stacks > 1:
+            if isinstance(sigma, int):
+                label_data = [label_data]*num_stacks
+            else:
+                label_size = label_data.shape[1:3]
+                points = heatmap2point(label_data)
+                label_data = [label_data]
+                for stack_i in range(1, num_stacks):
+                    heatmaps = draw_heatmap_batch(
+                        label_size, points,
+                        sigma=sigma[stack_i],
+                        mode=heatmap_type)
+                    if normalize:
+                        norm = heatmaps.sum(
+                            axis=(1, 2), keepdims=True)
+                        heatmaps = heatmaps/norm
+                    label_data.append(heatmaps)
+
+        return img_data, label_data
 
     def _process_paths(self, path_list):
         path_list = np.array(path_list)
@@ -168,6 +192,7 @@ class Keypoint_reader(object):
                        class_names,
                        img_size, label_size,
                        heatmap_type, sigma,
+                       normalize,
                        shuffle, seed,
                        encoding,
                        thread_num, format):
@@ -179,6 +204,10 @@ class Keypoint_reader(object):
                 label_im = draw_heatmap(
                     *label_size, point,
                     sigma, heatmap_type)
+                if normalize:
+                    norm = label_im.sum(
+                        axis=(0, 1), keepdims=True)
+                    label_im = label_im/norm
                 label_data[pos][..., index] = label_im
         def _imgaug_to_array(img, kps, pos, indexes):
             _encode_to_array(img, kps, pos, indexes)
@@ -302,6 +331,7 @@ class Keypoint_reader(object):
                      "R_hip", "R_knee", "R_ankle"],
         img_size=(512, 512), label_size="auto",
         heatmap_type="gs", sigma=2,
+        normalize=False, num_stacks=1,
         shuffle=False, seed=None,
         encoding="big5", thread_num=1):
         """Convert the JSON file generated by `labelme` into a Sequence.
@@ -324,8 +354,10 @@ class Keypoint_reader(object):
                 "gs": Gaussian heatmap.
                 "exp": Exponential heatmap(proposed by 
                 https://pubmed.ncbi.nlm.nih.gov/31683913/).
-            sigma: A integer,
+            sigma: An integer or list of integers.
                 standard deviation of 2D gaussian distribution.
+            num_stacks: An integer,
+                number of stacks of hourglass network.
             shuffle: Boolean, default: True.
             seed: An integer, random seed, default: None.
             encoding: A string,
@@ -335,18 +367,23 @@ class Keypoint_reader(object):
 
         Returns:
             A tf.Sequence.
-                Sequence[i]: (img data, label data)
+                Sequence[i]: A tuple of 2 ndarrays, (img data, label data),
+                             a list of tuples like above if num_stacks > 1.
             img data: 
                 shape (batches, img_height, img_width, channel)
             label data:
                 shape (batches, label_height, label_width, class_num)
         """
+        if hasattr(sigma, '__getitem__'):
+            first_sigma = sigma[0]
+        else:
+            first_sigma = sigma
         seq = KeypointSequence(
             img_path=img_path, label_path=label_path,
             batch_size=batch_size, class_names=class_names,
             img_size=img_size, label_size=label_size,
-            heatmap_type=heatmap_type, sigma=sigma,
-            label_format="labelme",
+            heatmap_type=heatmap_type, sigma=first_sigma,
+            normalize=normalize, label_format="labelme",
             rescale=self.rescale,
             preprocessing=self.preprocessing,
             augmenter=self.augmenter,
@@ -354,6 +391,33 @@ class Keypoint_reader(object):
             encoding=encoding, thread_num=thread_num)
         self.file_names = seq.path_list
 
+        if num_stacks > 1:
+            class StackedKeypointSequence(Sequence):
+                def __init__(self, seq, num_stacks):
+                    self.seq = seq
+                    self.num_stacks = num_stacks
+                def __len__(self):
+                    return len(self.seq)
+                def __getitem__(self, idx):
+                    img_data, label_data = self.seq[idx]
+                    if isinstance(sigma, int):
+                        label_data = [label_data]*num_stacks
+                    else:
+                        label_size = label_data.shape[1:3]
+                        points = heatmap2point(label_data)
+                        label_data = [label_data]
+                        for stack_i in range(1, num_stacks):
+                            heatmaps = draw_heatmap_batch(
+                                label_size, points,
+                                sigma=sigma[stack_i],
+                                mode=heatmap_type)
+                            if normalize:
+                                norm = heatmaps.sum(
+                                    axis=(1, 2), keepdims=True)
+                                heatmaps = heatmaps/norm
+                            label_data.append(heatmaps)
+                    return img_data, label_data
+            seq = StackedKeypointSequence(seq, num_stacks)
         return seq
 
 
@@ -371,6 +435,7 @@ class KeypointSequence(Sequence):
                  label_size="auto",
                  heatmap_type="gs",
                  sigma=2,
+                 normalize=False,
                  label_format="labelme",
                  rescale=1/255,
                  preprocessing=None,
@@ -433,6 +498,10 @@ class KeypointSequence(Sequence):
                 label_im = draw_heatmap(
                     *self.label_size, point,
                     self.sigma, self.heatmap_type)
+                if normalize:
+                    norm = label_im.sum(
+                        axis=(0, 1), keepdims=True)
+                    label_im = label_im/norm
                 label_data[pos][..., index] = label_im
         
         def _imgaug_to_array(img, kps, pos, indexes):
@@ -528,6 +597,25 @@ def decode(label, zoom_r):
     x_arr = max_index%label.shape[0]*zoom_r[1]
     y_arr = max_index//label.shape[0]*zoom_r[0]
     return x_arr, y_arr
+
+
+def heatmap2point(heatmap, zoom_r=(1, 1)):
+    """
+    Convert heatmaps to points.
+
+    Args:
+        heatmap: An array,
+            shape: (batches, heights, widths, num_classes).
+        zoom_r: An array like of magnification,
+            (heights, widths).
+    """
+    class_num = heatmap.shape[-1]
+    batches = heatmap.shape[0]
+    max_index = heatmap.reshape(batches, -1, class_num).argmax(axis=1)
+    x_arr = max_index%heatmap.shape[1]*zoom_r[1]
+    y_arr = max_index//heatmap.shape[1]*zoom_r[0]
+    points = np.stack((x_arr, y_arr), axis=-1)
+    return points
 
 
 def vis_img_ann(img, label,
@@ -746,9 +834,9 @@ def draw_heatmap(height, width,
     return heatmap
 
 
-def draw_heatmap3D(size, point, sigma, mode="gs"):
+def draw_heatmap_batch(size, point, sigma, mode="gs"):
     batches = point.shape[0]
-    class_num = point.shape[-1]
+    class_num = point.shape[-2]
     x = np.arange(size[1], dtype=np.float)
     y = np.arange(size[0], dtype=np.float)
     xx = np.zeros((batches, *size, class_num))
