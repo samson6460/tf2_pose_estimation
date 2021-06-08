@@ -31,7 +31,8 @@ def UpConv2D_Acti_BN(input_tensor, activation, *args):
                            kernel_initializer='he_normal')(output_tensor)
     output_tensor = BN()(output_tensor)
     return output_tensor
-# %%
+
+
 def unet(pretrained_weights=None,
          input_shape=(512, 512, 3),
          conv_activation='relu',
@@ -101,6 +102,8 @@ def unet(pretrained_weights=None,
         outputs = Activation("sigmoid")(conv10)
     elif activation=="softmax":
         outputs = Softmax(axis=(1, 2))(conv10)
+    else:
+        outputs = conv10
 
     model = Model(inputs, outputs)
     

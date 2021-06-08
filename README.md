@@ -18,6 +18,10 @@ There're Stacked Hourglass Network、DeepLabV3+、U-Net in this framework.
 
 ![U-Net](images/modified_unet.png)
 
+**ResUNet**: A U-net like model with ResNet backbone and UpResBlock.
+
+![ResUNet](images/ResUNet.png)
+
 # Table of Contents
 
 - [tf2_pose_estimation](#tf2_pose_estimation)

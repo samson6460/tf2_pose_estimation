@@ -7,3 +7,4 @@
 from .unet_model import unet
 from .deep_lab_model import deeplabv3
 from .hourglass_model import stack_hourglass_net
+from .resunet_model import resunet
