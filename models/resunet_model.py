@@ -1,4 +1,4 @@
-"""ResU-Net model.
+"""ResUNet model.
 """
 
 from functools import reduce
@@ -54,7 +54,7 @@ def Conv2DTranspose_BN_Leaky(*args, **kwargs):
 
 
 def UpConv2D_BN_Leaky(*args, **kwargs):
-    """Transpose Convolution2D followed by BatchNormalization and LeakyReLU."""
+    """Up Convolution2D followed by BatchNormalization and LeakyReLU."""
     conv_kwargs = {
         'use_bias': False,
         'padding': 'same',
@@ -86,14 +86,14 @@ def up_resblock_module(x, skip_connect, num_filters, num_blocks):
 
 
 def resunet(resnet_func=ResNet101,
-            input_shape=(416, 416, 3),
+            input_shape=(512, 512, 3),
             pretrained_backbone="imagenet",
             pretrained_weights=None,
             upskip_id=[-33, 80, 38, 4],
-            res_num_blocks=[23, 4, 3, 1],
+            res_num_blocks=[2, 22, 3, 2],
             num_points=15,
             activation='sigmoid'):
-    """Create ResU-Net architecture.
+    """Create ResUNet architecture.
     
     Args:
         resnet_func: A Resnet from

@@ -8,7 +8,8 @@ There're Stacked Hourglass Network、DeepLabV3+、U-Net in this framework.
 
 **Stacked Hourglass Network**: Stacked Hourglass Networks for Human Pose Estimation by Alejandro Newell, Kaiyu Yang, Jia Deng. (https://arxiv.org/abs/1603.06937).
 
-![Stacked Hourglass](https://media.arxiv-vanity.com/render-output/4613071/img/stacked-hg.png)
+![Stacked Hourglass](images/stacked-hg.png)
+(from https://www.arxiv-vanity.com/papers/1603.06937/)
 
 **DeepLabV3+**: Encoder-Decoder with Atrous Separable Convolution for Semantic Image Segmentation by Liang-Chieh Chen, Yukun Zhu, George Papandreou, Florian Schroff, Hartwig Adam (https://arxiv.org/abs/1802.02611).
 
