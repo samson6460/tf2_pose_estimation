@@ -8,7 +8,7 @@ import json
 import os
 import threading
 from io import BytesIO
-from math import ceil, log, pi
+from math import ceil, log
 
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
@@ -19,7 +19,6 @@ from PIL import Image
 import cv2
 from imgaug.augmentables import Keypoint, KeypointsOnImage
 from tensorflow.keras.utils import Sequence
-from tensorflow.python.keras.layers import normalization
 from tensorflow.python.ops.nn_impl import normalize
 
 
@@ -669,11 +668,7 @@ def vis_img_ann(img, label,
                 color=['r', 'lime', 'b', 'c', 'm', 'y',
                        'pink', 'w', 'brown', 'g', 'teal',
                        'navy', 'violet', 'linen', 'gold'],
-                connections = [[0, 1, 2],
-                               [1, 3, 4, 5],
-                               [1, 6, 7, 8],
-                               [2, 9, 10, 11],
-                               [2, 12, 13, 14]],
+                connections = None,
                 figsize=None,
                 dpi=None,
                 axis="off",
@@ -702,7 +697,7 @@ def vis_img_ann(img, label,
                 https://matplotlib.org/tutorials/colors/colors.html
             Example of RGB tuple of float:
                 [(1, 0, 0), (0, 0, 1)](which means Red、Blue).
-        connections: A list of lists of integers.
+        connections: None or a list of lists of integers.
             The way of key point connection.
             For example, [[0, 2], [1, 3]] means connecting point 0 and point 2,
             and connecting point 1 and point 3.
@@ -772,11 +767,7 @@ def draw_img_ann(img, label,
                  color=['r', 'lime', 'b', 'c', 'm', 'y',
                         'pink', 'w', 'brown', 'g', 'teal',
                         'navy', 'violet', 'linen', 'gold'],
-                 connections=[[0, 1, 2],
-                              [1, 3, 4, 5],
-                              [1, 6, 7, 8],
-                              [2, 9, 10, 11],
-                              [2, 12, 13, 14]],
+                 connections = None,
                  point_radius=8,
                  linewidth=4):
     """Draw image with annotation.
@@ -799,7 +790,7 @@ def draw_img_ann(img, label,
                 https://matplotlib.org/tutorials/colors/colors.html
             Example of RGB tuple of float:
                 [(1, 0, 0), (0, 0, 1)](which means Red、Blue).
-        connections: A list of lists of integers.
+        connections: None or a list of lists of integers.
             The way of key point connection.
             For example, [[0, 2], [1, 3]] means connecting point 0 and point 2,
             and connecting point 1 and point 3.
