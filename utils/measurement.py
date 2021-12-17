@@ -60,11 +60,15 @@ def get_score_table(ground_truth, prediction,
     if ground_truth.shape[0] == 1 and dist_thresh is None:
         dist_thresh = 0.1
 
-    x_arr_true, y_arr_true = heatmap2point(
+    point_true = heatmap2point(
         ground_truth, method=decode_method)
+    x_arr_true = point_true[..., 0]
+    y_arr_true = point_true[..., 1]
 
-    x_arr_pred, y_arr_pred = heatmap2point(
+    point_pred = heatmap2point(
         prediction, method=decode_method)
+    x_arr_pred = point_pred[..., 0]
+    y_arr_pred = point_pred[..., 1]
 
     if index is not None:
         x_arr_true = x_arr_true[index:index + 1]
