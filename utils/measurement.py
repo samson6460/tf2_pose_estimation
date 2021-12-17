@@ -8,8 +8,11 @@ import numpy as np
 import pandas as pd
 from math import log
 
+from .tools import heatmap2point
+
 
 def get_score_table(ground_truth, prediction,
+                    decode_method="max",
                     class_names=["Head", "Neck", "Hip",
                         "L_shoulder", "L_elbow", "L_wrist",
                         "R_shoulder", "R_elbow", "R_wrist",
@@ -28,6 +31,11 @@ def get_score_table(ground_truth, prediction,
             shape should be: (None, heights, widths, num_classes)
             or (1, heights, widths, num_classes).
             If batch size is 1, `index` is necessary.
+        decode_method: One of "max" and "mean".
+            "max": Use the brightest position
+                of the heatmap as the keypoint.
+            "mean": Use the average brightness
+                of the heatmap as the keypoint.
         class_names: A list of string,   
             corresponding name of label.
         dist_thresh: None or a float,
@@ -52,18 +60,11 @@ def get_score_table(ground_truth, prediction,
     if ground_truth.shape[0] == 1 and dist_thresh is None:
         dist_thresh = 0.1
 
-    class_num = ground_truth.shape[-1]
-    height = ground_truth.shape[1]
-    width =  ground_truth.shape[2]
-    area = height*width
+    x_arr_true, y_arr_true = heatmap2point(
+        ground_truth, method=decode_method)
 
-    max_index_true = ground_truth.reshape(
-        -1, area, class_num).argmax(axis=1)
-
-    x_arr_true = max_index_true%height
-    y_arr_true = max_index_true//height
-    x_arr_true_all = x_arr_true
-    y_arr_true_all = y_arr_true
+    x_arr_pred, y_arr_pred = heatmap2point(
+        prediction, method=decode_method)
 
     if index is not None:
         x_arr_true = x_arr_true[index:index + 1]
@@ -71,12 +72,6 @@ def get_score_table(ground_truth, prediction,
         OKS_name = "OKS"
     else:
         OKS_name = "mOKS"
-
-    max_index_pred = prediction.reshape(
-        -1, area, class_num).argmax(axis=1)
-
-    x_arr_pred = max_index_pred%height
-    y_arr_pred = max_index_pred//height
 
     dist_square = ((x_arr_true - x_arr_pred)**2
                   +(y_arr_true - y_arr_pred)**2)
@@ -93,11 +88,11 @@ def get_score_table(ground_truth, prediction,
     norm = np.expand_dims(s_x*s_y, axis=1)
 
     if dist_thresh is None:
-        mu_x = x_arr_true_all.mean(axis=0)
-        mu_y = y_arr_true_all.mean(axis=0)
+        mu_x = x_arr_true.mean(axis=0)
+        mu_y = y_arr_true.mean(axis=0)
 
-        var = (((x_arr_true_all-mu_x)**2
-                + (y_arr_true_all-mu_y)**2)/norm).mean(axis=0)
+        var = (((x_arr_true-mu_x)**2
+                + (y_arr_true-mu_y)**2)/norm).mean(axis=0)
         k_square = np.expand_dims(4*var, axis=0)
     else:
         k_square = - 1/(2*log(0.5))*dist_thresh**2

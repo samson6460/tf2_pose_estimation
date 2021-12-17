@@ -597,34 +597,75 @@ class KeypointSequence(Sequence):
         return img_data, label_data
 
 
-def decode(label, zoom_r):
-    class_num = label.shape[-1]
-    max_index = label.reshape(-1, class_num).argmax(axis=0)
-    x_arr = max_index%label.shape[0]*zoom_r[1]
-    y_arr = max_index//label.shape[0]*zoom_r[0]
+def decode(label, zoom_r, method="mean"):
+    height, width = label.shape[:2]
+    
+    if method == "max":
+        num_points = label.shape[-1]
+        max_index = label.reshape(-1, num_points).argmax(axis=0)
+        
+        x_arr = max_index%height*zoom_r[1]
+        y_arr = max_index//height*zoom_r[0]
+    elif method == "mean":
+        label = label/label.sum(axis=(0, 1), keepdims=True)
+        
+        index_map_x = np.arange(width).reshape((1, -1, 1))
+        index_map_y = np.arange(height).reshape((-1, 1, 1))
+
+        label_map_x = label*index_map_x
+        label_map_y = label*index_map_y
+
+        x_arr = np.sum(label_map_x, axis=(0, 1))*zoom_r[1]
+        y_arr = np.sum(label_map_y, axis=(0, 1))*zoom_r[0]
+    
     return x_arr, y_arr
 
 
-def heatmap2point(heatmap, zoom_r=(1, 1)):
+def heatmap2point(heatmaps, zoom_r=(1, 1), method="max"):
     """
     Convert heatmaps to points.
 
     Args:
         heatmap: An array,
-            shape: (batches, heights, widths, num_classes).
+            shape: (batches, heights, widths, num_points).
         zoom_r: An array like of magnification,
             (heights, widths).
+        method: One of "max" and "mean".
+            "max": Use the brightest position
+                of the heatmap as the keypoint.
+            "mean": Use the average brightness
+                of the heatmap as the keypoint.
+
+    Returns:
+        An array, shape: (batches, num_points, 2).
     """
-    class_num = heatmap.shape[-1]
-    batches = heatmap.shape[0]
-    max_index = heatmap.reshape(batches, -1, class_num).argmax(axis=1)
-    x_arr = max_index%heatmap.shape[1]*zoom_r[1]
-    y_arr = max_index//heatmap.shape[1]*zoom_r[0]
+    height, width = heatmaps.shape[1:3]
+    
+    if method == "max":
+        num_points = heatmaps.shape[-1]
+        area = height*width
+        max_index = heatmaps.reshape(-1, area, num_points).argmax(axis=1)
+        
+        x_arr = max_index%height*zoom_r[1]
+        y_arr = max_index//height*zoom_r[0]
+    elif method == "mean":
+        heatmaps = heatmaps/heatmaps.sum(axis=(1, 2), keepdims=True)
+        
+        index_map_x = np.arange(width).reshape((1, 1, -1, 1))
+        index_map_y = np.arange(height).reshape((1, -1, 1, 1))
+
+        label_map_x = heatmaps*index_map_x
+        label_map_y = heatmaps*index_map_y
+
+        x_arr = np.sum(label_map_x, axis=(1, 2))*zoom_r[1]
+        y_arr = np.sum(label_map_y, axis=(1, 2))*zoom_r[0]
+    
     points = np.stack((x_arr, y_arr), axis=-1)
     return points
 
 
 def vis_img_ann(img, label,
+                decode_method="max",
                 color=['r', 'lime', 'b', 'c', 'm', 'y',
                        'pink', 'w', 'brown', 'g', 'teal',
                        'navy', 'violet', 'linen', 'gold'],
@@ -647,6 +688,11 @@ def vis_img_ann(img, label,
     Args:
         img: A ndarry of shape(img heights, img widths, color channels).
         label: A ndarray of annotations.
+        decode_method: One of "max" and "mean".
+            "max": Use the brightest position
+                of the heatmap as the keypoint.
+            "mean": Use the average brightness
+                of the heatmap as the keypoint.
         color: A list of color string or RGB tuple of float.
             Example of color string:
                 ['r', 'lime', 'b', 'c', 'm', 'y',
@@ -690,7 +736,7 @@ def vis_img_ann(img, label,
     ax.imshow(img)
     ax.axis(axis)
 
-    x_arr, y_arr = decode(label, zoom_r)
+    x_arr, y_arr = decode(label, zoom_r, decode_method)
 
     for class_i in range(class_num):
         x = x_arr[class_i]
@@ -722,6 +768,7 @@ def vis_img_ann(img, label,
 
 
 def draw_img_ann(img, label,
+                 decode_method="max",
                  color=['r', 'lime', 'b', 'c', 'm', 'y',
                         'pink', 'w', 'brown', 'g', 'teal',
                         'navy', 'violet', 'linen', 'gold'],
@@ -738,6 +785,11 @@ def draw_img_ann(img, label,
         img: A ndarry of shape(img heights, img widths, color channels).
             dtype: uint8, range: [0-255].
         label: A ndarray of annotations.
+        decode_method: One of "max" and "mean".
+            "max": Use the brightest position
+                of the heatmap as the keypoint.
+            "mean": Use the average brightness
+                of the heatmap as the keypoint.
         color: A list of color string or RGB tuple of float.
             Example of color string:
                 ['r', 'lime', 'b', 'c', 'm', 'y',
@@ -758,7 +810,7 @@ def draw_img_ann(img, label,
     class_num = label.shape[-1]
     zoom_r = np.array(img.shape[:2])/np.array(label.shape[:2])
 
-    x_arr, y_arr = decode(label, zoom_r)
+    x_arr, y_arr = decode(label, zoom_r, decode_method)
     x_arr = x_arr.astype("int")
     y_arr = y_arr.astype("int")
 
