@@ -36,7 +36,6 @@ from tensorflow.keras.layers import Conv2D
 from tensorflow.keras.layers import DepthwiseConv2D
 from tensorflow.keras.layers import ZeroPadding2D
 from tensorflow.keras.layers import GlobalAveragePooling2D
-from tensorflow.keras.layers import Activation
 from tensorflow.keras.utils import get_source_inputs
 from tensorflow.keras.utils import get_file
 from tensorflow.keras.applications.imagenet_utils import preprocess_input

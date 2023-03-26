@@ -3,6 +3,7 @@
 
 """Utilities and tools for pose estimation.
 """
+
 import base64
 import json
 import os
@@ -19,7 +20,9 @@ from PIL import Image
 import cv2
 from imgaug.augmentables import Keypoint, KeypointsOnImage
 from tensorflow.keras.utils import Sequence
-from tensorflow.python.ops.nn_impl import normalize
+
+
+EPSILON = 1e-07
 
 
 def read_img(path, size=(512, 512), rescale=None, preprocessing=None):
@@ -173,6 +176,7 @@ class Keypoint_reader(object):
                     if normalize:
                         norm = heatmaps.sum(
                             axis=(1, 2), keepdims=True)
+                        norm = np.maximum(norm, EPSILON)
                         heatmaps = heatmaps/norm
                     label_data.append(heatmaps)
 
@@ -209,6 +213,7 @@ class Keypoint_reader(object):
                 if normalize:
                     norm = label_im.sum(
                         axis=(0, 1), keepdims=True)
+                    norm = np.maximum(norm, EPSILON)
                     label_im = label_im/norm
                 label_data[pos][..., index] = label_im
         def _imgaug_to_array(img, kps, pos, indexes):
@@ -322,7 +327,7 @@ class Keypoint_reader(object):
         self.file_names = path_list
 
         return img_data, label_data
-    
+
     def labelme_json_to_sequence(
         self, img_path=None, label_path=None,
         batch_size=20,
@@ -419,6 +424,7 @@ class Keypoint_reader(object):
                             if normalize:
                                 norm = heatmaps.sum(
                                     axis=(1, 2), keepdims=True)
+                                norm = np.maximum(norm, EPSILON)
                                 heatmaps = heatmaps/norm
                             label_data.append(heatmaps)
                     return img_data, label_data
@@ -456,7 +462,8 @@ class KeypointSequence(Sequence):
         self.class_num = len(class_names)
         self.img_size = img_size
         self.heatmap_type = heatmap_type
-        self.sigma = sigma     
+        self.sigma = sigma
+        self.normalize = normalize
         self.label_format = label_format
         self.rescale = rescale
         self.preprocessing = preprocessing
@@ -470,6 +477,8 @@ class KeypointSequence(Sequence):
             self.label_size = img_size[0]//4, img_size[1]//4
         elif label_size == "same":
             self.label_size = img_size
+        else:
+            self.label_size = label_size
         
         if (label_format == "labelme" 
             and (img_path is None or label_path is None)):
@@ -503,9 +512,10 @@ class KeypointSequence(Sequence):
                 label_im = draw_heatmap(
                     *self.label_size, point,
                     self.sigma, self.heatmap_type)
-                if normalize:
+                if self.normalize:
                     norm = label_im.sum(
                         axis=(0, 1), keepdims=True)
+                    norm = np.maximum(norm, EPSILON)
                     label_im = label_im/norm
                 label_data[pos][..., index] = label_im
         

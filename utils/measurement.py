@@ -11,18 +11,42 @@ from math import log
 from .tools import heatmap2point
 
 
+def _index_to_point(x_arr, y_arr, index):
+    if isinstance(index, int):
+        point_x = x_arr[:, index]
+        point_y = y_arr[:, index]
+    else:
+        point_x = x_arr[:, index[0]]**2
+        point_y = y_arr[:, index[0]]**2
+        for idx in index[1:]:
+            point_x = point_x + x_arr[:, idx]**2
+            point_y = point_y + y_arr[:, idx]**2
+        point_x = np.sqrt(point_x)
+        point_y = np.sqrt(point_y)
+    return point_x, point_y
+
+
+def _get_dist(x_arr, y_arr, start, end):
+    start_x, start_y = _index_to_point(x_arr, y_arr, start)
+    end_x, end_y = _index_to_point(x_arr, y_arr, end)
+    s_d = np.sqrt((start_x - end_x)**2 + (start_y - end_y)**2)
+    return s_d
+
+
 def get_score_table(ground_truth, prediction,
                     decode_method="max",
-                    class_names=["Head", "Neck", "Hip",
-                        "L_shoulder", "L_elbow", "L_wrist",
-                        "R_shoulder", "R_elbow", "R_wrist",
-                        "L_hip", "L_knee", "L_ankle",
-                        "R_hip", "R_knee", "R_ankle"],
+                    class_names=["Head", "Eye_L", "Eye_R", "Nose",
+                                 "Upper_Lip", "Lower_Lip", "Shoulder_R","Shoulder_L",
+                                 "Elbow_R", "Elbow_L", "Wrist_R", "Wrist_L",
+                                 "MP_joint_R", "MP_joint_L", "Hip_R", "Hip_L",
+                                 "Knee_R", "Knee_L", "Ankle_R", "Ankle_L",
+                                 "MTP_joint_R", "MTP_joint_L"],
                     dist_thresh=None,
                     oks_thresh=0.5,
-                    norm_index=[[3, 6], [0, 2]],
+                    norm_index=[[6, 7], [0, [14, 15]]],
                     index=None):
-    """Get mOKS and recall table.
+    """Get mOKS(Object Keypoint Similarity) and
+    PCK(Percentage of Correct Keypoints) table.
 
     Args:
         ground_truth: A ndarray,
@@ -82,12 +106,8 @@ def get_score_table(ground_truth, prediction,
 
     (norm_x_start, norm_x_end), (norm_y_start, norm_y_end) = norm_index
 
-    s_x = np.sqrt(
-        (x_arr_true[:, norm_x_start] - x_arr_true[:, norm_x_end])**2
-        +(y_arr_true[:, norm_x_start] - y_arr_true[:, norm_x_end])**2)
-    s_y = np.sqrt(
-        (x_arr_true[:, norm_y_start] - x_arr_true[:, norm_y_end])**2
-        +(y_arr_true[:, norm_y_start] - y_arr_true[:, norm_y_end])**2)
+    s_x = _get_dist(x_arr_true, y_arr_true, norm_x_start, norm_x_end)
+    s_y = _get_dist(x_arr_true, y_arr_true, norm_y_start, norm_y_end)
 
     norm = np.expand_dims(s_x*s_y, axis=1)
 
@@ -102,10 +122,10 @@ def get_score_table(ground_truth, prediction,
         k_square = - 1/(2*log(0.5))*dist_thresh**2
     oks = np.exp(-1*(dist_square)/(2*norm*k_square))
     oks_mean = oks.mean(axis=0)
-    recall_arr = (oks >= oks_thresh).sum(axis=0)/len(oks)
+    pck_arr = (oks >= oks_thresh).sum(axis=0)/len(oks)
 
-    score_table = pd.DataFrame([oks_mean, recall_arr])
+    score_table = pd.DataFrame([oks_mean, pck_arr])
     score_table.columns = class_names
-    score_table.index = [OKS_name, "recall"]
+    score_table.index = [OKS_name, "PCK"]
 
     return score_table

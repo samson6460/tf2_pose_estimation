@@ -1,33 +1,24 @@
-from functools import wraps
-from functools import reduce
+"""Stacked hourglass model.
+"""
 
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Conv2D, Add, ZeroPadding2D, UpSampling2D, Concatenate, MaxPooling2D, LeakyReLU
-from tensorflow.keras.layers import BatchNormalization
+from tensorflow.keras.layers import Conv2D, Add
+from tensorflow.keras.layers import UpSampling2D, MaxPooling2D
 from tensorflow.keras.layers import Input
 from tensorflow.keras.layers import Activation
 
 from .custom_layers import Softmax
-
-
-def compose(*funcs):
-    """Compose arbitrarily many functions, evaluated left to right.
-
-    Reference: https://mathieularose.com/function-composition-in-python/
-    """
-    # return lambda x: reduce(lambda v, f: f(v), funcs, x)
-    if funcs:
-        return reduce(lambda f, g: lambda *a, **kw: g(f(*a, **kw)), funcs)
-    else:
-        raise ValueError('Composition of empty sequence not supported.')
+from .custom_layers import Conv2D_BN_Leaky
 
 
 def Conv2D_BN_Leaky(*args, **kwargs):
     """Convolution2D followed by BatchNormalization and ReLU."""
-    return compose(
-        Conv2D(*args, **kwargs),
-        BatchNormalization(),
-        LeakyReLU(alpha=0.1))
+    conv_kwargs = {
+        'use_bias': True,
+        'padding': 'same',
+        'kernel_initializer':'he_normal'}
+    conv_kwargs.update(kwargs)
+    return Conv2D_BN_Leaky(*args, **kwargs)
 
 
 def resblock_module(x, num_filters):

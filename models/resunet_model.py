@@ -1,70 +1,14 @@
 """ResUNet model.
 """
 
-from functools import reduce
-
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Conv2D, Add
-from tensorflow.keras.layers import Conv2DTranspose
-from tensorflow.keras.layers import Concatenate
-from tensorflow.keras.layers import LeakyReLU
-from tensorflow.keras.layers import BatchNormalization
-from tensorflow.keras.layers import UpSampling2D
+from tensorflow.keras.layers import Conv2D
+from tensorflow.keras.layers import Concatenate, Add
 from tensorflow.keras.layers import Activation
 from tensorflow.keras.applications import ResNet101
 
-from .custom_layers import Softmax
-
-def compose(*funcs):
-    """Compose arbitrarily many functions, evaluated left to right.
-
-    Reference: https://mathieularose.com/function-composition-in-python/
-    """
-    # return lambda x: reduce(lambda v, f: f(v), funcs, x)
-    if funcs:
-        return reduce(lambda f, g: lambda *a, **kw: g(f(*a, **kw)), funcs)
-    else:
-        raise ValueError('Composition of empty sequence not supported.')
-
-
-def Conv2D_BN_Leaky(*args, **kwargs):
-    """Convolution2D followed by BatchNormalization and LeakyReLU."""
-    conv_kwargs = {
-        'use_bias': False,
-        'padding': 'same',
-        'kernel_initializer':'he_normal'}
-    conv_kwargs.update(kwargs)
-    return compose(
-        Conv2D(*args, **conv_kwargs),
-        BatchNormalization(),
-        LeakyReLU(alpha=0.1))
-
-
-def Conv2DTranspose_BN_Leaky(*args, **kwargs):
-    """Transpose Convolution2D followed by BatchNormalization and LeakyReLU."""
-    convtrans_kwargs = {
-        'use_bias': False,
-        'padding': 'same',
-        'kernel_initializer':'he_normal'}
-    convtrans_kwargs.update(kwargs)
-    return compose(
-        Conv2DTranspose(*args, **convtrans_kwargs),
-        BatchNormalization(),
-        LeakyReLU(alpha=0.1))
-
-
-def UpConv2D_BN_Leaky(*args, **kwargs):
-    """Up Convolution2D followed by BatchNormalization and LeakyReLU."""
-    conv_kwargs = {
-        'use_bias': False,
-        'padding': 'same',
-        'kernel_initializer':'he_normal'}
-    conv_kwargs.update(kwargs)
-    return compose(
-        UpSampling2D(size = (2, 2)),
-        Conv2D(*args, **conv_kwargs),
-        BatchNormalization(),
-        LeakyReLU(alpha=0.1))
+from .custom_layers import Softmax, compose
+from .custom_layers import Conv2D_BN_Leaky, UpConv2D_BN_Leaky
 
 
 def up_resblock_module(x, skip_connect, num_filters, num_blocks):
@@ -91,6 +35,7 @@ def resunet(resnet_func=ResNet101,
             pretrained_weights=None,
             upskip_id=[-33, 80, 38, 4],
             res_num_blocks=[2, 22, 3, 2],
+            skip_connect_input=True,
             num_points=15,
             activation='sigmoid'):
     """Create ResUNet architecture.
@@ -110,6 +55,7 @@ def resunet(resnet_func=ResNet101,
             index of skip connections from extracting path.
         res_num_blocks: A list of integer.
             number of repetitions of up-residual blocks.
+        skip_connect_input: A boolean, whether to skip connect input tensor.
         num_points: An integer,
             number of keypoints.
         activation: A string or None,
@@ -134,10 +80,12 @@ def resunet(resnet_func=ResNet101,
         num_filters //= 2
         x = up_resblock_module(x, appnet.layers[id].output,
             num_filters, num_blocks)
-
-    x = UpConv2D_BN_Leaky(32, (3, 3))(x)
-    x = Concatenate()([x, appnet.layers[0].output])
-    x = Conv2D_BN_Leaky(32, (3, 3))(x)
+    
+    if skip_connect_input:
+        x = UpConv2D_BN_Leaky(32, (3, 3))(x)
+        x = Concatenate()([x, appnet.layers[0].output])
+        x = Conv2D_BN_Leaky(32, (3, 3))(x)
+        
     x = Conv2D(num_points, 1)(x)
 
     if activation=="sigmoid":
