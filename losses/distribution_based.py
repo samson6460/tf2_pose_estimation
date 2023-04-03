@@ -6,21 +6,43 @@
 
 import tensorflow as tf
 
-epsilon = 1e-07
+EPSILON = 1e-07
 
 
 def balanced_categorical_crossentropy(class_weight=1):
+    """
+    Args:
+        class_weight: A float or a list of floats,
+            acts as reduction weighting coefficient
+            for the per-class losses. If a scalar is provided,
+            then the loss is simply scaled by the given value.
+    Return:
+        A function.
+    """
     def _balanced_categorical_crossentropy(y_true, y_pred):
-        y_pred = tf.clip_by_value(y_pred, epsilon, 1 - epsilon)
-        ce = -tf.reduce_sum(
+        y_pred = tf.clip_by_value(y_pred, EPSILON, 1 - EPSILON)
+        crossentropy = -tf.reduce_sum(
             (y_true*tf.math.log(y_pred)*class_weight), axis=-1)
-        return ce
+        return crossentropy
     return _balanced_categorical_crossentropy
 
 
 def balanced_binary_crossentropy(class_weight=1, binary_weight=1):
+    """
+    Args:
+        class_weight: A float or a list of floats,
+            acts as reduction weighting coefficient
+            for the per-class losses. If a scalar is provided,
+            then the loss is simply scaled by the given value.
+        binary_weight: A float,
+        acts as reduction weighting coefficient
+        for the positive and negative losses.
+
+    Return:
+        A function.
+    """
     def _balanced_binary_crossentropy(y_true, y_pred):
-        y_pred = tf.clip_by_value(y_pred, epsilon, 1 - epsilon)
+        y_pred = tf.clip_by_value(y_pred, EPSILON, 1 - EPSILON)
         bce = -tf.reduce_mean(
             (y_true*tf.math.log(y_pred)
             + binary_weight*(1 - y_true)
@@ -30,7 +52,12 @@ def balanced_binary_crossentropy(class_weight=1, binary_weight=1):
 
 
 def channeled_categorical_crossentropy(y_true, y_pred):
-    y_pred = tf.clip_by_value(y_pred, epsilon, 1 - epsilon)
-    ce = -tf.reduce_sum(
+    """Calculate crossentropy and sum each keypoint heatmap.
+
+    Return:
+        loss tensor with shape: (N, keypoints).
+    """
+    y_pred = tf.clip_by_value(y_pred, EPSILON, 1 - EPSILON)
+    crossentropy = -tf.reduce_sum(
         y_true*tf.math.log(y_pred), axis=(1, 2))
-    return ce
+    return crossentropy

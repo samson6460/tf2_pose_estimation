@@ -11,22 +11,24 @@ from .custom_layers import Softmax, compose
 from .custom_layers import Conv2D_BN_Leaky, UpConv2D_BN_Leaky
 
 
-def up_resblock_module(x, skip_connect, num_filters, num_blocks):
-    y = UpConv2D_BN_Leaky(num_filters, (1, 1))(x)
-    x = compose(UpConv2D_BN_Leaky(num_filters//4, (1, 1)),
-                Conv2D_BN_Leaky(num_filters//4, (3, 3)),
-                Conv2D_BN_Leaky(num_filters, (1, 1)))(x)
-    x = Add()([x, y])
-    x = Concatenate()([x, skip_connect])
-    x = Conv2D_BN_Leaky(num_filters, (1, 1))(x)
+def up_resblock_module(tensor, skip_connect, num_filters, num_blocks):
+    """Up residual block module."""
+    skip_tensor = UpConv2D_BN_Leaky(num_filters, (1, 1))(tensor)
+    tensor = compose(
+        UpConv2D_BN_Leaky(num_filters//4, (1, 1)),
+        Conv2D_BN_Leaky(num_filters//4, (3, 3)),
+        Conv2D_BN_Leaky(num_filters, (1, 1)))(tensor)
+    tensor = Add()([tensor, skip_tensor])
+    tensor = Concatenate()([tensor, skip_connect])
+    tensor = Conv2D_BN_Leaky(num_filters, (1, 1))(tensor)
 
     for _ in range(num_blocks):
-        y = compose(
+        skip_tensor = compose(
             Conv2D_BN_Leaky(num_filters//4, (1, 1)),
             Conv2D_BN_Leaky(num_filters//4, (3, 3)),
-            Conv2D_BN_Leaky(num_filters, (1, 1)))(x)
-        x = Add()([x, y])
-    return x
+            Conv2D_BN_Leaky(num_filters, (1, 1)))(tensor)
+        tensor = Add()([tensor, skip_tensor])
+    return tensor
 
 
 def resunet(resnet_func=ResNet101,
@@ -55,7 +57,8 @@ def resunet(resnet_func=ResNet101,
             index of skip connections from extracting path.
         res_num_blocks: A list of integer.
             number of repetitions of up-residual blocks.
-        skip_connect_input: A boolean, whether to skip connect input tensor.
+        skip_connect_input: A boolean,
+            whether to skip connect to input tensor.
         num_points: An integer,
             number of keypoints.
         activation: A string or None,
@@ -67,33 +70,34 @@ def resunet(resnet_func=ResNet101,
     """
     if pretrained_weights is not None:
         pretrained_backbone = None
-    
+
     appnet = resnet_func(
         include_top=False,
         weights=pretrained_backbone,
         input_shape=input_shape)
 
-    x = appnet.output
-    num_filters = x.shape[-1]
+    tensor = appnet.output
+    num_filters = tensor.shape[-1]
 
-    for id, num_blocks in zip(upskip_id, res_num_blocks):
+    for i_skip, num_blocks in zip(upskip_id, res_num_blocks):
         num_filters //= 2
-        x = up_resblock_module(x, appnet.layers[id].output,
+        tensor = up_resblock_module(
+            tensor, appnet.layers[i_skip].output,
             num_filters, num_blocks)
-    
+
     if skip_connect_input:
-        x = UpConv2D_BN_Leaky(32, (3, 3))(x)
-        x = Concatenate()([x, appnet.layers[0].output])
-        x = Conv2D_BN_Leaky(32, (3, 3))(x)
-        
-    x = Conv2D(num_points, 1)(x)
+        tensor = UpConv2D_BN_Leaky(32, (3, 3))(tensor)
+        tensor = Concatenate()([tensor, appnet.layers[0].output])
+        tensor = Conv2D_BN_Leaky(32, (3, 3))(tensor)
+
+    tensor = Conv2D(num_points, 1)(tensor)
 
     if activation=="sigmoid":
-        outputs = Activation("sigmoid")(x)
+        outputs = Activation("sigmoid")(tensor)
     elif activation=="softmax":
-        outputs = Softmax(axis=(1, 2))(x)
+        outputs = Softmax(axis=(1, 2))(tensor)
     else:
-        outputs = x
+        outputs = tensor
 
     model = Model(appnet.input, outputs)
 

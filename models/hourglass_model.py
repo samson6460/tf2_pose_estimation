@@ -21,63 +21,68 @@ def Conv2D_BN_Leaky(*args, **kwargs):
     return Conv2D_BN_Leaky(*args, **kwargs)
 
 
-def resblock_module(x, num_filters):
-    skip = Conv2D_BN_Leaky(num_filters, (1, 1))(x)
+def resblock_module(tensor, num_filters):
+    """Residual block module."""
+    skip = Conv2D_BN_Leaky(num_filters, (1, 1))(tensor)
 
-    x = Conv2D_BN_Leaky(num_filters//2, (1, 1))(x)
-    x = Conv2D_BN_Leaky(num_filters//2, (3, 3), padding='same')(x)
-    x = Conv2D_BN_Leaky(num_filters, (1, 1))(x)
-    x = Add()([skip, x])
+    tensor = Conv2D_BN_Leaky(num_filters//2, (1, 1))(tensor)
+    tensor = Conv2D_BN_Leaky(num_filters//2, (3, 3), padding='same')(tensor)
+    tensor = Conv2D_BN_Leaky(num_filters, (1, 1))(tensor)
+    tensor = Add()([skip, tensor])
 
-    return x
+    return tensor
 
 
 def hourglass_module(input_tensor, stage):
+    """Hourglass module."""
     stage -= 1
     skip = resblock_module(input_tensor, 256)
-    x = MaxPooling2D(pool_size=(2,2), strides=(2,2))(input_tensor)
-    x = resblock_module(x, 256)
+    tensor = MaxPooling2D(pool_size=(2, 2), strides=(2, 2))(input_tensor)
+    tensor = resblock_module(tensor, 256)
     if stage == 0:
-        x = resblock_module(x, 256)
+        tensor = resblock_module(tensor, 256)
     else:
-        x = hourglass_module(x, stage)
-    x = resblock_module(x, 256)
-    x = UpSampling2D(2)(x)
-    x = Add()([skip, x])
+        tensor = hourglass_module(tensor, stage)
+    tensor = resblock_module(tensor, 256)
+    tensor = UpSampling2D(2)(tensor)
+    tensor = Add()([skip, tensor])
 
-    return x
+    return tensor
 
 
 def front_module(input_tensor, num_filters=256):
-    x = Conv2D_BN_Leaky(
+    """Front module of hourglass model."""
+    tensor = Conv2D_BN_Leaky(
         num_filters//4, (7, 7), (2, 2),
         padding='same')(input_tensor)
-    x = resblock_module(x, num_filters//2)
-    x = MaxPooling2D(pool_size=(2, 2), strides=(2, 2))(x)
-    x = resblock_module(x, num_filters//2)
-    x = resblock_module(x, num_filters)
+    tensor = resblock_module(tensor, num_filters//2)
+    tensor = MaxPooling2D(pool_size=(2, 2), strides=(2, 2))(tensor)
+    tensor = resblock_module(tensor, num_filters//2)
+    tensor = resblock_module(tensor, num_filters)
 
-    return x
+    return tensor
+
 
 def stack_module(input_tensor, num_points,
                  num_filters=256, stage=4,
                  activation="sigmoid", is_head=False):
-    x = hourglass_module(input_tensor, stage)
-    x = resblock_module(x, num_filters)
-    x = Conv2D_BN_Leaky(num_filters, (1, 1))(x)
-    outputs = Conv2D(num_points, (1, 1))(x)
+    """Stack module."""
+    tensor = hourglass_module(input_tensor, stage)
+    tensor = resblock_module(tensor, num_filters)
+    tensor = Conv2D_BN_Leaky(num_filters, (1, 1))(tensor)
+    outputs = Conv2D(num_points, (1, 1))(tensor)
     if activation=="sigmoid":
         outputs = Activation("sigmoid")(outputs)
     elif activation=="softmax":
         outputs = Softmax(axis=(1, 2))(outputs)
-    
+
     if is_head:
         return outputs
     else:
-        x = Conv2D(num_filters, (1, 1))(x)
+        tensor = Conv2D(num_filters, (1, 1))(tensor)
         skip = Conv2D(num_filters, (1, 1))(outputs)
-        x = Add()([skip, x])
-        return outputs, x
+        tensor = Add()([skip, tensor])
+        return outputs, tensor
 
 
 def stack_hourglass_net(
@@ -110,20 +115,20 @@ def stack_hourglass_net(
     """
     output_list = []
     inputs = Input(input_shape)
-    x = front_module(inputs, num_filters=num_filters)
+    tensor = front_module(inputs, num_filters=num_filters)
 
     for _ in range(num_stacks - 1):
-        skip = x
-        outputs, x = stack_module(
-            x, num_points,
+        skip = tensor
+        outputs, tensor = stack_module(
+            tensor, num_points,
             num_filters=num_filters,
             stage=stage,
             activation=activation)
-        x = Add()([skip, x])
+        tensor = Add()([skip, tensor])
         output_list.append(outputs)
 
     outputs = stack_module(
-        x, num_points,
+        tensor, num_points,
         num_filters=num_filters,
         stage=stage,
         activation=activation,
@@ -134,5 +139,5 @@ def stack_hourglass_net(
 
     if pretrained_weights is not None:    
         model.load_weights(pretrained_weights)
-    
+
     return model

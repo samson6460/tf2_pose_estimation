@@ -97,9 +97,9 @@ def get_score_table(ground_truth, prediction,
     if index is not None:
         x_arr_true = x_arr_true[index:index + 1]
         y_arr_true = y_arr_true[index:index + 1]
-        OKS_name = "OKS"
+        oks_name = "OKS"
     else:
-        OKS_name = "mOKS"
+        oks_name = "mOKS"
 
     dist_square = ((x_arr_true - x_arr_pred)**2
                   +(y_arr_true - y_arr_pred)**2)
@@ -126,6 +126,6 @@ def get_score_table(ground_truth, prediction,
 
     score_table = pd.DataFrame([oks_mean, pck_arr])
     score_table.columns = class_names
-    score_table.index = [OKS_name, "PCK"]
+    score_table.index = [oks_name, "PCK"]
 
     return score_table

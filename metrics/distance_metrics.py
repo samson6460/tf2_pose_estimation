@@ -2,6 +2,8 @@ import tensorflow as tf
 
 
 def distance_from_prob(y_true, y_pred):
+    """Get keypoint distance from heatmap probability.
+    """
     height, width = y_pred.get_shape()[1:3]
 
     index_map_x = tf.range(width, dtype=y_true.dtype)
@@ -25,4 +27,3 @@ def distance_from_prob(y_true, y_pred):
     dist = tf.reduce_mean(dist, axis=-1)
 
     return dist
-
