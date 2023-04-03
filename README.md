@@ -19,7 +19,7 @@ and Tracking by Bin Xiao, Haiping Wu, and Yichen Wei. (https://arxiv.org/abs/180
 
 **DeepLabV3+**: Encoder-Decoder with Atrous Separable Convolution for Semantic Image Segmentation by Liang-Chieh Chen, Yukun Zhu, George Papandreou, Florian Schroff, Hartwig Adam (https://arxiv.org/abs/1802.02611).
 
-![DeepLabV3+](images\DeepLabV3_plus.png)
+![DeepLabV3+](images/DeepLabV3_plus.png)
 (from https://arxiv.org/abs/1802.02611)
 
 **U-Net**: Convolutional Networks for Biomedical Image Segmentation by Olaf Ronneberger, Philipp Fischer, Thomas Brox (https://arxiv.org/abs/1505.04597).
